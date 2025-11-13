@@ -32,14 +32,26 @@ def load_data(path):
         st.error(f"Error: Data file '{path}' not found.")
         st.stop()
 
-# --- Helper Function for Analysis ---
+# --- [NEW] Helper Function for Analysis ---
+# This function now returns the image, a caption, AND a message type
 def analyze_image(image_to_analyze):
     with st.spinner('Analyzing image...'):
         results = model(image_to_analyze)
     
-    img_with_boxes = results[0].plot()
-    img_with_boxes_rgb = Image.fromarray(img_with_boxes[..., ::-1])
-    return img_with_boxes_rgb
+    # Check if any boxes were detected
+    if len(results[0].boxes) == 0:
+        # No defects found
+        result_image = image_to_analyze # Return the original, clean image
+        result_caption = "Analysis Complete: No defects found!"
+        result_type = "info" # We'll use this for a blue info box
+    else:
+        # Defects were found
+        img_with_boxes = results[0].plot()
+        result_image = Image.fromarray(img_with_boxes[..., ::-1])
+        result_caption = "Analysis Complete: Defects are marked with boxes."
+        result_type = "success" # We'll use this for a green success box
+        
+    return result_image, result_caption, result_type
 
 # --- Load Models and Data ---
 model = load_model('best.pt')
@@ -83,14 +95,11 @@ if df_filtered.empty:
 else:
     df_metrics = df_filtered
 
-# --- [NEW] Header for Tabs ---
-# This adds a big, colorful divider to draw the user's eye to the tabs
+# --- Header for Tabs ---
 st.subheader("Select an Action:", divider="rainbow")
-
-# --- [NEW] More Descriptive Tab Names ---
 tab1, tab2 = st.tabs(["🚀 Live AI Analysis (Try the Model)", "📊 Dashboard Analysis (Explore the Data)"])
 
-# --- TAB 1: Live AI Analysis (No Changes) ---
+# --- TAB 1: Live AI Analysis ---
 with tab1:
     st.header("Try the AI Model Yourself!")
     st.write("Upload your own image or use one of our samples.")
@@ -104,8 +113,11 @@ with tab1:
         if uploaded_file:
             bytes_data = uploaded_file.getvalue()
             img = Image.open(io.BytesIO(bytes_data))
-            st.session_state.analysis_result = analyze_image(img)
-            st.session_state.analysis_caption = "Analysis of your uploaded image"
+            # [NEW] Save all 3 returned values
+            result_img, result_cap, result_type = analyze_image(img)
+            st.session_state.analysis_result = result_img
+            st.session_state.analysis_caption = result_cap
+            st.session_state.analysis_type = result_type
 
     with col2:
         st.subheader("...or Test with a Sample Image")
@@ -122,8 +134,11 @@ with tab1:
                 
                 if st.button(f"Test Sample {i+1}", key=f"test_button_{i}"):
                     img = Image.open(image_path)
-                    st.session_state.analysis_result = analyze_image(img)
-                    st.session_state.analysis_caption = f"Analysis of Sample {i+1}"
+                    # [NEW] Save all 3 returned values
+                    result_img, result_cap, result_type = analyze_image(img)
+                    st.session_state.analysis_result = result_img
+                    st.session_state.analysis_caption = result_cap
+                    st.session_state.analysis_type = result_type
 
     st.markdown("---") 
     st.subheader("🔬 Analysis Result")
@@ -131,7 +146,15 @@ with tab1:
 
     if 'analysis_result' in st.session_state:
         with result_container:
-            st.success(st.session_state.get('analysis_caption', 'Analysis Complete!'), icon="✅")
+            # [NEW] Check the message type and show the correct color box
+            result_type = st.session_state.get('analysis_type', 'success')
+            result_caption = st.session_state.get('analysis_caption', 'Analysis Complete!')
+            
+            if result_type == "success":
+                st.success(result_caption, icon="✅")
+            else:
+                st.info(result_caption, icon="ℹ️") # Show blue info box
+            
             st.image(
                 st.session_state['analysis_result'], 
                 use_container_width=True
@@ -174,7 +197,7 @@ with tab2:
         df_metrics['x_center'] = df_metrics['x_min'] + (df_metrics['width'] / 2)
         df_metrics['y_center'] = df_metrics['y_min'] + (df_metrics['height'] / 2)
         fig_heatmap = px.density_heatmap(df_metrics, 
-                                         x='x_center', y='y_center', 
+                                         x='x_center', y='x_center', 
                                          title='Defect Location Hotspots',
                                          nbinsx=50, nbinsy=50)
         fig_heatmap.update_yaxes(autorange="reversed")
